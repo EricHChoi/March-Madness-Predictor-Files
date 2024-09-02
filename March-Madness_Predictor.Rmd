@@ -1,0 +1,1156 @@
+---
+title: "March Madness Mania: Predicting the Mayhem"
+author: 'Eric Choi'
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  word_document:
+    toc: yes
+    toc_depth: '4'
+urlcolor: blue  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.height=4, fig.width=6, warning = F)
+library(adabag)
+if (!require("pacman")) install.packages("pacman")
+# add packages for document matrix and text mining
+pacman::p_load(randomForest, tree, ISLR, rpart, rpart.plot, rattle, pROC, partykit, ggplot2, glmnet, leaps, dplyr, keras, neuralnet, imager, ranger, dplyr, ggplot2, tm, SnowballC, RColorBrewer, wordcloud, glmnet, randomForest, ranger, data.table, party, caret)
+```
+
+# Overview
+
+Every March, millions of crazed basketball fans and wannabe millionaires fill out brackets for the yearly College Basketball Playoffs, termed "March Madness." They all vye to be the first ever "perfect" bracket in March Madness history. With over 25 million brackets on the day the playoffs start, only single digit numbers of them remain perfect by the end of the first week. This project is aimed at creating a predictor/classifier for March Madness games. The predictor/classifier will be built using machine learning techniques and will use historical data such as team statistics, player data, and game results from previous March Madness tournaments as well as Regular Season results. Furthermore, additional data on the official and expert-predicted rank of teams in March Madness are used to strengthen the predictions. This model is used to predict the results of the 2022 March Madness season based on data from 2003 onwards. The specific methods that will be used for this project include unsupervised learning methods: Principal Component Analysis, Clustering (K-means clustering, Spectrum Analysis), and supervised learning methods: Regression (Simple Linear, Multiple Linear), Model Selection (LASSO), Classification (Logistic Regression, Decision Trees, Deep Learning, and Boosting). Ultimately, the developed predictor/classifier will be tested against the 2022 March Madness games to assess its effectiveness. The success of this project will not only help basketball fans improve their bracket accuracy, but also demonstrate the power of machine learning in predicting complex events.
+
+# Data Acquisition, Preparation, and EDA
+
+## Data Acquisition
+
+We start by importing all of the data that we got from Kaggle.
+
+We can use the .head() function to get a sneak peek of the dataset to ensure that we loaded in the data correctly.
+
+```{r}
+
+# all of the regular season data
+regular_season_df <- read.csv("march-machine-learning-mania-2023/MRegularSeasonDetailedResults.csv")
+
+head(regular_season_df)
+
+```
+
+```{r}
+
+# all of the march madnness tournament data
+march_madness_df = read.csv("march-machine-learning-mania-2023/MNCAATourneyDetailedResults.csv")
+
+head(march_madness_df)
+
+```
+
+```{r}
+
+# all of the seeds in the march madness tournament
+
+tourney_seeds_df = read.csv("march-machine-learning-mania-2023/MNCAATourneySeeds.csv")
+
+head(tourney_seeds_df)
+
+```
+
+```{r}
+
+# all of the teams in Men's Division 1 Basketball
+
+teams_df = read.csv("march-machine-learning-mania-2023/MTeams.csv")
+
+head(teams_df)
+
+```
+
+```{r}
+
+conference_df = read.csv("march-machine-learning-mania-2023/MTeamConferences.csv")
+
+head(conference_df)
+
+```
+
+```{r}
+
+# all of the conference data
+
+conferences_df = read.csv("march-machine-learning-mania-2023/Conferences.csv")
+
+head(conferences_df)
+
+```
+
+```{r}
+
+# all of the cities that the games are played in
+cities_df = read.csv("march-machine-learning-mania-2023/MGameCities.csv")
+
+head(cities_df)
+
+```
+
+```{r}
+# all of the coaches 
+coaches_df = read.csv("march-machine-learning-mania-2023/MTeamCoaches.csv")
+
+head(coaches_df)
+
+```
+
+```{r}
+# all of the rankings of teams
+ordinal_ranking_df = read.csv("march-machine-learning-mania-2023/MMasseyOrdinals_thru_Season2023_Day128.csv")
+
+head(ordinal_ranking_df)
+
+```
+
+## Data Preparation/Wrangling
+
+```{r}
+
+#Get a list of participating teams in March Madness in 2022 through the tourney_seeds_df dataframe
+
+tourney_seeds_2022_df <- tourney_seeds_df %>%
+  filter(Season == 2022)
+
+head(tourney_seeds_2022_df)
+
+# Remove all games from both regular_season_df and march_madness_df that do not include a team that is participating in the 2022 March Madness Tournament and remove all 2023 games from regular_season_df
+
+temp_regular_season_df <- regular_season_df %>%
+  filter(WTeamID %in% tourney_seeds_2022_df$TeamID | LTeamID %in% tourney_seeds_2022_df$TeamID) 
+
+head(temp_regular_season_df)
+
+temp_march_madness_df <- march_madness_df %>%
+  filter(WTeamID %in% tourney_seeds_2022_df$TeamID | LTeamID %in% tourney_seeds_2022_df$TeamID)
+
+head(temp_march_madness_df)
+
+```
+
+```{r}
+
+# filter teams_df to only include TeamID and TeamName
+
+teams_df <- teams_df %>%
+  select(TeamID, TeamName)
+
+# merge the name of the team that Won and Lost for both regular season and march madness games using the teams_df dataframe 
+
+temp2_regular_season_df <- temp_regular_season_df %>%
+  left_join(teams_df, by = c("WTeamID" = "TeamID")) %>%
+  rename(WTeamName = TeamName) %>%
+  left_join(teams_df, by = c("LTeamID" = "TeamID")) %>%
+  rename(LTeamName = TeamName)
+
+head(temp2_regular_season_df)
+
+temp2_march_madness_df <- temp_march_madness_df %>%
+  left_join(teams_df, by = c("WTeamID" = "TeamID")) %>%
+  rename(WTeamName = TeamName) %>%
+  left_join(teams_df, by = c("LTeamID" = "TeamID")) %>%
+  rename(LTeamName = TeamName)
+
+head(temp2_march_madness_df)
+
+```
+
+```{r}
+
+# Add the conference for both the team that won and lost for both regular season and march madness games
+
+temp3_regular_season_df <- temp2_regular_season_df %>%
+  left_join(conference_df, by = c("Season", "WTeamID" = "TeamID")) %>%
+  rename(WConference = ConfAbbrev) %>%
+  left_join(conference_df, by = c("Season", "LTeamID" = "TeamID")) %>%
+  rename(LConference = ConfAbbrev)
+
+head(temp3_regular_season_df)
+
+temp3_march_madness_df <- temp2_march_madness_df %>%
+  left_join(conference_df, by = c("Season", "WTeamID" = "TeamID")) %>%
+  rename(WConference = ConfAbbrev) %>%
+  left_join(conference_df, by = c("Season", "LTeamID" = "TeamID")) %>%
+  rename(LConference = ConfAbbrev)
+
+head(temp3_march_madness_df)
+
+```
+
+
+```{r}
+
+# Replace the Conference Abbreviations with the Full Conference Name using the conferences_df dataframe
+
+temp4_regular_season_df <- temp3_regular_season_df %>%
+  left_join(conferences_df, by = c("WConference" = "ConfAbbrev")) %>%
+  rename(WConferenceName = Description) %>%
+  left_join(conferences_df, by = c("LConference" = "ConfAbbrev")) %>%
+  rename(LConferenceName = Description) %>%
+  select(-WConference, -LConference)
+head(temp4_regular_season_df)
+
+temp4_march_madness_df <- temp3_march_madness_df %>%
+  left_join(conferences_df, by = c("WConference" = "ConfAbbrev")) %>%
+  rename(WConferenceName = Description) %>%
+  left_join(conferences_df, by = c("LConference" = "ConfAbbrev")) %>%
+  rename(LConferenceName = Description) %>%
+  select(-WConference, -LConference)
+
+```
+
+```{r}
+
+#Filter out CRType from the cities_df dataframe
+
+final_cities_df <- cities_df %>%
+  select(-CRType)
+
+# Merge to obtain the cities that the games were played in
+
+temp5_regular_season_df <- temp4_regular_season_df %>%
+  left_join(final_cities_df, by = c("Season", "DayNum", "WTeamID", "LTeamID"))
+
+head(temp5_regular_season_df)
+
+# We note that a lot of the CityID's are NA and on further inspection realize that this data was only tracked after 2010
+
+# We will filter out all games before 2010 
+
+regular_season_df_after_2010_with_cities_df <- temp5_regular_season_df %>%
+  filter(!is.na(CityID))
+
+head(regular_season_df_after_2010_with_cities_df)
+
+march_madness_df_after_2010_with_cities_df <- temp3_march_madness_df %>%
+  left_join(final_cities_df, by = c("Season", "DayNum", "WTeamID", "LTeamID")) %>%
+  filter(!is.na(CityID))
+
+head(march_madness_df_after_2010_with_cities_df)
+
+```
+We will continue to use temp4_regular_season_df since we lost a lot of data items when considering only games after 2010.
+
+```{r}
+
+# Drop FirstDayNum and LastDayNum from the coaches_df dataframe
+final_coaches_df <- coaches_df %>%
+  select(-FirstDayNum, -LastDayNum)
+
+# Join to Obtain the Coaches for both the winning and losing team
+
+temp6_regular_season_df <- temp4_regular_season_df %>%
+  left_join(final_coaches_df, by = c("Season", "WTeamID" = "TeamID")) %>%
+  rename(WCoachName = CoachName) %>%
+  left_join(final_coaches_df, by = c("Season", "LTeamID" = "TeamID"))  %>%
+  rename(LCoachName = CoachName) %>%
+  mutate(WCoachName = gsub("_", " ", WCoachName)) %>%
+  mutate(LCoachName = gsub("_", " ", LCoachName))
+
+head(temp6_regular_season_df)
+
+temp6_march_madness_df <- temp4_march_madness_df %>%
+  left_join(final_coaches_df, by = c("Season", "WTeamID" = "TeamID")) %>%
+  rename(WCoachName = CoachName) %>%
+  left_join(final_coaches_df, by = c("Season", "LTeamID" = "TeamID")) %>%
+  rename(LCoachName = CoachName) %>%
+  mutate(WCoachName = gsub("_", " ", WCoachName)) %>%
+  mutate(LCoachName = gsub("_", " ", LCoachName))
+
+
+```
+
+```{r}
+
+#merge seeds with teams using the tourney_seeds_df dataframe
+
+temp7_march_madness_df <- temp6_march_madness_df %>%
+  left_join(tourney_seeds_df, by = c("Season", "WTeamID" = "TeamID")) %>%
+  rename(WSeed = Seed) %>%
+  left_join(tourney_seeds_df, by = c("Season", "LTeamID" = "TeamID")) %>%
+  rename(LSeed = Seed) %>%
+  mutate(WRawSeed = as.integer(substr(WSeed, 2, 3))) %>%
+  mutate(LRawSeed = as.integer(substr(LSeed, 2, 3)))
+
+temp7_regular_season_df <- temp6_regular_season_df %>%
+  left_join(tourney_seeds_df, by = c("Season", "WTeamID" = "TeamID")) %>%
+  rename(WSeed = Seed) %>%
+  left_join(tourney_seeds_df, by = c("Season", "LTeamID" = "TeamID")) %>%
+  rename(LSeed = Seed) %>%
+  # fill the NA values for Seed with Z99a
+  mutate(WSeed = ifelse(is.na(WSeed), "Z99a", WSeed)) %>%
+  mutate(LSeed = ifelse(is.na(LSeed), "Z99a", LSeed)) %>%
+  mutate(WRawSeed = as.integer(substr(WSeed, 2, 3))) %>%
+  mutate(LRawSeed = as.integer(substr(LSeed, 2, 3)))
+
+
+head(temp7_march_madness_df)
+
+```
+
+```{r}
+# Calculate average ordinal ranking of all systems for the last day in the regular season (133) to use for March Madness Tournament
+
+avg_ordinal_ranking <- ordinal_ranking_df %>%
+  group_by(RankingDayNum, TeamID) %>%
+  select(RankingDayNum, TeamID, OrdinalRank, Season) %>%
+  summarise(mean(OrdinalRank)) %>%
+   arrange(desc(RankingDayNum)) 
+
+last_day_avg_ordinal <- avg_ordinal_ranking %>% 
+  filter(RankingDayNum==133)
+
+# Update dataframe with rankings for both the winning and losing team 
+
+temp8_march_madness_df <- temp7_march_madness_df %>%
+  left_join(last_day_avg_ordinal, by = c("WTeamID" = "TeamID"))
+
+temp8_march_madness_df <- temp8_march_madness_df %>%
+  select(-RankingDayNum) %>%
+  rename('WOrdinalRank' = 'mean(OrdinalRank)')
+
+temp8_march_madness_df <- temp8_march_madness_df %>%
+  left_join(last_day_avg_ordinal, by = c("LTeamID" = "TeamID"))
+
+temp8_march_madness_df <- temp8_march_madness_df %>%
+  select(-RankingDayNum) %>%
+  rename('LOrdinalRank' = 'mean(OrdinalRank)')
+```
+
+```{r}
+# Calculate average ordinal ranking of all systems to use for the regular season
+
+avg_ordinal_ranking_asc <- ordinal_ranking_df %>%
+  group_by(RankingDayNum, TeamID) %>%
+  select(RankingDayNum, TeamID, OrdinalRank, Season) %>%
+  summarise(mean(OrdinalRank)) %>%
+  arrange(RankingDayNum)
+
+# Function to match the nearest integer
+nearest_int <- function(x, y) {
+  y[which.min(abs(x - y))]
+}
+
+# Match the nearest day of the ordinal ranking for each regular season game day (for both winner and loser)
+
+temp8_regular_season_df <- temp7_regular_season_df
+
+temp8_regular_season_df$closest_value <- sapply(temp8_regular_season_df$DayNum, nearest_int, y = avg_ordinal_ranking_asc$RankingDayNum)
+
+temp8_regular_season_df <- left_join(temp8_regular_season_df, avg_ordinal_ranking_asc, by = c("closest_value" = "RankingDayNum"))
+temp8_regular_season_df <- temp8_regular_season_df[temp8_regular_season_df$WTeamID == temp8_regular_season_df$TeamID, ]
+
+temp8_regular_season_df <- temp8_regular_season_df %>%
+  select(-TeamID) %>%
+  rename('WOrdinalRank' = 'mean(OrdinalRank)')
+
+temp8_regular_season_df <- left_join(temp8_regular_season_df, avg_ordinal_ranking_asc, by = c("closest_value" = "RankingDayNum"))
+temp8_regular_season_df <- temp8_regular_season_df[temp8_regular_season_df$LTeamID == temp8_regular_season_df$TeamID, ]
+
+temp8_regular_season_df <- temp8_regular_season_df %>%
+  select(-TeamID) %>%
+  select(-closest_value) %>%
+  rename('LOrdinalRank' = 'mean(OrdinalRank)')
+```
+
+There are a variety of functions we can use to summarize the data including str(), summmary(), table(), and names(). We can use these functions to get a better understanding of the data (mean, standard deviation, type of variables, etc.) and to see if there are any missing values. 
+
+```{r}
+# Get a summary of the data
+
+str(temp8_march_madness_df)
+summary(temp8_march_madness_df)
+any(is.na(temp8_march_madness_df))
+
+str(temp8_regular_season_df)
+summary(temp8_regular_season_df)
+any(is.na(temp8_regular_season_df))
+```
+
+## Exploratory Data Analysis and Data Visualization
+EDA builds upon the data cleaning, preparation, and wrangling that we have already done by adding on visualizations that will help us to understand the relationships between the variables.
+```{r}
+#Initial histograms for some of the variables that we believe to be predictors of the response variable
+
+#Field Goals Made
+ggplot(temp8_regular_season_df) + 
+  geom_histogram(aes(x = WFGM), bins = 15, fill = "blue") +
+  labs(title = "Histogram of Field Goals Made by Winning Team", x = "Field Goals Made", "Frequency")
+
+
+ggplot(temp8_regular_season_df) + 
+  geom_histogram(aes(x = LFGM), bins = 15, fill = "green") +
+  labs(title = "Histogram of Field Goals Made by Losing Team", x = "Field Goals Made", "Frequency")
+
+#Three Pointers
+ggplot(temp8_regular_season_df) + 
+  geom_histogram(aes(x = WFGM3), bins = 20, fill = "blue") +
+  labs(title = "Histogram of Three Pointers Made by Winning Team", x = "Three Pointers Made", "Frequency")
+
+ggplot(temp8_regular_season_df) + 
+  geom_histogram(aes(x = LFGM3), bins = 20, fill = "green") +
+  labs(title = "Histogram of Three Pointers Made by Losing Team", x = "Three Pointers Made", "Frequency")
+
+#Steals
+ggplot(temp8_regular_season_df) + 
+  geom_histogram(aes(x = WStl), bins = 20, fill = "blue") +
+  stat_function(fun = "mean", color = "red", size = 1) +
+  stat_function(fun = "median", color = "green", size = 1) +
+  labs(title = "Histogram of Steals Made by Winning Team", x = "Steals Made", y = "Frequency")
+
+ggplot(temp8_regular_season_df) + 
+  geom_histogram(aes(x = LStl), bins = 20, fill = "green") +
+  stat_function(fun = "mean", color = "red", size = 5) +
+  stat_function(fun = "median", color = "blue", size = 1) +
+  labs(title = "Histogram of Steals Made by Losing Team", x = "Steals Made", "Frequency")
+```
+
+```{r}
+# Conference vs. Winning Percentage
+
+wins_by_conference_regular_season_df <- temp6_regular_season_df %>%
+  group_by(Season, WConferenceName) %>%
+  summarise(NumWins = n()) %>%
+  ungroup()
+
+
+losses_by_conference_regular_season_df <- temp6_regular_season_df %>%
+  group_by(Season, LConferenceName) %>%
+  summarise(NumLosses = n()) %>%
+  ungroup()
+
+wins_and_losses_by_conference_regular_season_df <- wins_by_conference_regular_season_df %>%
+  left_join(losses_by_conference_regular_season_df, by = c("Season", "WConferenceName" = "LConferenceName")) %>%
+  mutate(WinningPercentage = NumWins/(NumWins + NumLosses)) %>%
+  filter (Season == 2023) %>%
+  select(WConferenceName, WinningPercentage) %>%
+  rename(ConferenceName = WConferenceName) 
+
+ggplot(wins_and_losses_by_conference_regular_season_df, aes(x = ConferenceName, y = WinningPercentage)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Winning Percentage by Conference in the Regular Season of 2023", x = "Conference", y = "Winning Percentage")
+
+
+wins_by_conference_march_madness_df <- temp7_march_madness_df %>%
+  group_by(Season, WConferenceName) %>%
+  summarise(NumWins = n()) %>%
+  ungroup()
+
+losses_by_conference_march_madness_df <- temp7_march_madness_df %>%
+  group_by(Season, LConferenceName) %>%
+  summarise(NumLosses = n()) %>%
+  ungroup()
+
+wins_and_losses_by_conference_march_madness_df <- wins_by_conference_march_madness_df %>%
+  left_join(losses_by_conference_march_madness_df, by = c("Season", "WConferenceName" = "LConferenceName")) %>%
+  mutate(WinningPercentage = NumWins/(NumWins + NumLosses)) %>%
+  filter (Season == 2022) %>%
+  select(WConferenceName, WinningPercentage) %>%
+  rename(ConferenceName = WConferenceName)
+
+ggplot(wins_and_losses_by_conference_march_madness_df, aes(x = ConferenceName, y = WinningPercentage)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Winning Percentage by Conference in the March Madness Tournament of 2022", x = "Conference", y = "Winning Percentage")
+
+```
+
+```{r}
+
+# Seed vs. Winning percentage 
+
+wins_by_seed_march_madness_df <- temp7_march_madness_df %>%
+  group_by(Season, WSeed) %>%
+  summarise(NumWins = n()) %>%
+  ungroup()
+
+losses_by_seed_march_madness_df <- temp7_march_madness_df %>%
+  group_by(Season, LSeed) %>%
+  summarise(NumLosses = n()) %>%
+  ungroup()
+
+wins_and_losses_by_seed_march_madness_df <- wins_by_seed_march_madness_df %>%
+  left_join(losses_by_seed_march_madness_df, by = c("Season", "WSeed" = "LSeed")) %>%
+  mutate(WinningPercentage = NumWins/(NumWins + NumLosses)) %>%
+  select(WSeed, WinningPercentage) %>%
+  rename(Seed = WSeed)
+
+ggplot(wins_and_losses_by_seed_march_madness_df, aes(x = Seed, y = WinningPercentage)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Winning Percentage by Seed in the March Madness Tournament", x = "Seed", y = "Winning Percentage")
+
+# Now let's do it with Raw Seed (without the region)
+
+wins_by_raw_seed_march_madness_df <- temp7_march_madness_df %>%
+  group_by(Season, WRawSeed) %>%
+  summarise(NumWins = n()) %>%
+  ungroup()
+
+losses_by_raw_seed_march_madness_df <- temp7_march_madness_df %>%
+  group_by(Season, LRawSeed) %>%
+  summarise(NumLosses = n()) %>%
+  ungroup()
+
+wins_and_losses_by_raw_seed_march_madness_df <- wins_by_raw_seed_march_madness_df %>%
+  left_join(losses_by_raw_seed_march_madness_df, by = c("Season", "WRawSeed" = "LRawSeed")) %>%
+  mutate(WinningPercentage = NumWins/(NumWins + NumLosses)) %>%
+  select(WRawSeed, WinningPercentage) %>%
+  rename(RawSeed = WRawSeed)
+
+ggplot(wins_and_losses_by_raw_seed_march_madness_df, aes(x = RawSeed, y = WinningPercentage)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Winning Percentage by Raw Seed in the March Madness Tournament", x = "Raw Seed", y = "Winning Percentage")
+
+```
+
+```{r}
+
+# Coaches vs. Winning Percentage in the Regular Season vs. March Madness Scattered Plot
+
+wins_by_coach_regular_season_df <- temp6_regular_season_df %>%
+  group_by(Season, WCoachName) %>%
+  summarise(NumWins = n()) %>%
+  ungroup()
+
+losses_by_coach_regular_season_df <- temp6_regular_season_df %>%
+  group_by(Season, LCoachName) %>%
+  summarise(NumLosses = n()) %>%
+  ungroup()
+
+wins_and_losses_by_coach_regular_season_df <- wins_by_coach_regular_season_df %>%
+  left_join(losses_by_coach_regular_season_df, by = c("Season", "WCoachName" = "LCoachName")) %>%
+  mutate(WinningPercentage = NumWins/(NumWins + NumLosses)) %>%
+  select(WCoachName, WinningPercentage) %>%
+  rename(CoachName = WCoachName)
+
+
+wins_by_coach_march_madness_df <- temp7_march_madness_df %>%
+  group_by(Season, WCoachName) %>%
+  summarise(NumWins = n()) %>%
+  ungroup()
+
+losses_by_coach_march_madness_df <- temp7_march_madness_df %>%
+  group_by(Season, LCoachName) %>%
+  summarise(NumLosses = n()) %>%
+  ungroup()
+
+wins_and_losses_by_coach_march_madness_df <- wins_by_coach_march_madness_df %>%
+  left_join(losses_by_coach_march_madness_df, by = c("Season", "WCoachName" = "LCoachName")) %>%
+  mutate(WinningPercentage = NumWins/(NumWins + NumLosses)) %>%
+  select(WCoachName, WinningPercentage) %>%
+  rename(CoachName = WCoachName)
+
+coach_wins_and_losses_regular_season_vs_march_madness_df <- wins_and_losses_by_coach_regular_season_df %>%
+  left_join(wins_and_losses_by_coach_march_madness_df, by = c("CoachName")) %>%
+  rename(RegularSeasonWinningPercentage = WinningPercentage.x, MarchMadnessWinningPercentage = WinningPercentage.y)
+
+ggplot(coach_wins_and_losses_regular_season_vs_march_madness_df, aes(x = RegularSeasonWinningPercentage, y = MarchMadnessWinningPercentage)) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Regular Season Winning Percentage vs. March Madness Winning Percentage", x = "Regular Season Winning Percentage", y = "March Madness Winning Percentage")
+
+```
+```{r}
+# Winning Ordinal Rank vs. Winning percentage for March Madness 
+
+wins_by_ordinal_rank_march_madness_df <- temp8_march_madness_df %>%
+  group_by(Season, WOrdinalRank) %>%
+  summarise(NumWins = n()) %>%
+  ungroup()
+
+losses_by_ordinal_rank_march_madness_df <- temp8_march_madness_df %>%
+  group_by(Season, LOrdinalRank) %>%
+  summarise(NumLosses = n()) %>%
+  ungroup()
+
+wins_and_losses_by_ordinal_rank_march_madness_df <- wins_by_ordinal_rank_march_madness_df %>%
+  left_join(losses_by_ordinal_rank_march_madness_df, by = c("Season", "WOrdinalRank" = "LOrdinalRank")) %>%
+  mutate(WinningPercentage = NumWins/(NumWins + NumLosses)) %>%
+  select(WOrdinalRank, WinningPercentage) %>%
+  rename(OrdinalRank = WOrdinalRank)
+
+wins_and_losses_by_ordinal_rank_march_madness_df <- na.omit(wins_and_losses_by_ordinal_rank_march_madness_df)
+
+ggplot(wins_and_losses_by_ordinal_rank_march_madness_df, aes(x = OrdinalRank, y = WinningPercentage)) +
+  geom_bar(stat = "identity", fill = "blue", size = 50, width = 0.95, alpha = 1) +
+  labs(title = "Winning Percentage by Ordinal Rank in the March Madness Tournament", x = "Ordinal Rank", y = "Winning Percentage") +
+  scale_x_continuous(limits = c(min(wins_and_losses_by_ordinal_rank_march_madness_df$OrdinalRank), max(wins_and_losses_by_ordinal_rank_march_madness_df$OrdinalRank)))
+```
+
+```{r}
+
+# Winning Ordinal Rank vs. Winning percentage for Regular Season
+
+wins_by_ordinal_rank_regular_season_df <- temp8_regular_season_df %>%
+  group_by(Season, WOrdinalRank) %>%
+  summarise(NumWins = n()) %>%
+  ungroup()
+
+losses_by_ordinal_rank_regular_season_df <- temp8_regular_season_df %>%
+  group_by(Season, LOrdinalRank) %>%
+  summarise(NumLosses = n()) %>%
+  ungroup()
+
+wins_and_losses_by_ordinal_rank_regular_season_df <- wins_by_ordinal_rank_regular_season_df %>%
+  left_join(losses_by_ordinal_rank_regular_season_df, by = c("Season", "WOrdinalRank" = "LOrdinalRank")) %>%
+  mutate(WinningPercentage = NumWins/(NumWins + NumLosses)) %>%
+  select(WOrdinalRank, WinningPercentage) %>%
+  rename(OrdinalRank = WOrdinalRank)
+
+wins_and_losses_by_ordinal_rank_regular_season_df <- na.omit(wins_and_losses_by_ordinal_rank_regular_season_df)
+
+ggplot(wins_and_losses_by_ordinal_rank_regular_season_df, aes(x = OrdinalRank, y = WinningPercentage)) +
+  geom_bar(stat = "identity", fill = "blue", size = 10, width = 0.5, alpha = 1) +
+  labs(title = "Winning Percentage by Ordinal Rank in the Regular Season", x = "Ordinal Rank", y = "Winning Percentage")
+```
+
+```{r}
+# Final data processing
+
+final_regular_season_df = temp8_regular_season_df
+
+final_march_madness_df <- temp8_march_madness_df
+
+
+#Step 1: In order to use PCA all of the data must be numeric, so must convert the categorical character columns (WLoc, WTeamName, LTeamName, WConferenceName, LConferenceName, WCoachName, LCoachName) into numbers
+
+final_regular_season_df$WLoc <- as.factor(final_regular_season_df$WLoc)
+final_regular_season_df$WTeamName <- as.factor(final_regular_season_df$WTeamName)
+final_regular_season_df$LTeamName <- as.factor(final_regular_season_df$LTeamName)
+final_regular_season_df$WConferenceName <- as.factor(final_regular_season_df$WConferenceName)
+final_regular_season_df$LConferenceName <- as.factor(final_regular_season_df$LConferenceName)
+final_regular_season_df$WCoachName <- as.factor(final_regular_season_df$WCoachName)
+final_regular_season_df$LCoachName <- as.factor(final_regular_season_df$LCoachName)
+final_regular_season_df$WSeed <- as.factor(final_regular_season_df$WSeed)
+final_regular_season_df$LSeed <- as.factor(final_regular_season_df$LSeed)
+
+final_regular_season_df$WLoc <- as.numeric(final_regular_season_df$WLoc)
+final_regular_season_df$WTeamName <- as.numeric(final_regular_season_df$WTeamName)
+final_regular_season_df$LTeamName <- as.numeric(final_regular_season_df$LTeamName)
+final_regular_season_df$WConferenceName <- as.numeric(final_regular_season_df$WConferenceName)
+final_regular_season_df$LConferenceName <- as.numeric(final_regular_season_df$LConferenceName)
+final_regular_season_df$WCoachName <- as.numeric(final_regular_season_df$WCoachName)
+final_regular_season_df$LCoachName <- as.numeric(final_regular_season_df$LCoachName)
+final_regular_season_df$WSeed <- as.numeric(final_regular_season_df$WSeed)
+final_regular_season_df$LSeed <- as.numeric(final_regular_season_df$LSeed)
+
+final_march_madness_df$WLoc <- as.factor(final_march_madness_df$WLoc)
+final_march_madness_df$WTeamName <- as.factor(final_march_madness_df$WTeamName)
+final_march_madness_df$LTeamName <- as.factor(final_march_madness_df$LTeamName)
+final_march_madness_df$WConferenceName <- as.factor(final_march_madness_df$WConferenceName)
+final_march_madness_df$LConferenceName <- as.factor(final_march_madness_df$LConferenceName)
+final_march_madness_df$WCoachName <- as.factor(final_march_madness_df$WCoachName)
+final_march_madness_df$LCoachName <- as.factor(final_march_madness_df$LCoachName)
+final_march_madness_df$WSeed <- as.factor(final_march_madness_df$WSeed)
+final_march_madness_df$LSeed <- as.factor(final_march_madness_df$LSeed)
+
+final_march_madness_df$WLoc <- as.numeric(final_march_madness_df$WLoc)
+final_march_madness_df$WTeamName <- as.numeric(final_march_madness_df$WTeamName)
+final_march_madness_df$LTeamName <- as.numeric(final_march_madness_df$LTeamName)
+final_march_madness_df$WConferenceName <- as.numeric(final_march_madness_df$WConferenceName)
+final_march_madness_df$LConferenceName <- as.numeric(final_march_madness_df$LConferenceName)
+final_march_madness_df$WCoachName <- as.numeric(final_march_madness_df$WCoachName)
+final_march_madness_df$LCoachName <- as.numeric(final_march_madness_df$LCoachName)
+final_march_madness_df$WSeed <- as.numeric(final_march_madness_df$WSeed)
+final_march_madness_df$LSeed <- as.numeric(final_march_madness_df$LSeed)
+
+```
+
+# Supervised Learning: Classification
+
+In our case, we will be predicting the winner of games in March Madness 2022. We will be using the regular season dataset to train our model and then use the tournament dataset to test our model.
+
+Before we can introduce the models that we will be using for classification, we need to alter the dataset and standardize to ensure that all of the variables are the same in the train and test datasets.
+
+Let's start by altering the training dataset
+
+``` {r}
+
+# Create a new column location which is the location that the game is played. If WLoc = N, then Location = Neutral, if WLoc = H, then Location = WTeamName, if WLoc = A, then Location = LTeamName
+
+final_regular_season_df$Location <- ifelse(final_regular_season_df$WLoc == "N", "Neutral", ifelse(final_regular_season_df$WLoc == "H", final_regular_season_df$WTeamName, final_regular_season_df$LTeamName))
+final_march_madness_df$Location <- ifelse(final_march_madness_df$WLoc == "N", "Neutral", ifelse(final_march_madness_df$WLoc == "H", final_march_madness_df$WTeamName, final_march_madness_df$LTeamName))
+
+# Add a winner column to the dataframe, which is equal to WTeamID
+
+final_regular_season_df$Winner <- final_regular_season_df$WTeamID
+final_march_madness_df$Winner <- final_march_madness_df$WTeamID
+
+# Drop unnecessary columns: WLoc, NumOT, WTeamName, LTeamName
+
+temp9_regular_season_df <- final_regular_season_df %>% select(-WLoc, -NumOT, -WTeamName, -LTeamName)
+
+temp9_march_madness_df <- final_march_madness_df %>% select(-WLoc, -NumOT, -WTeamName, -LTeamName)
+
+# Remove all regular season games in 2023
+
+temp10_regular_season_df <- temp9_regular_season_df %>% filter(Season != 2023)
+
+temp10_march_madness_df <- temp9_march_madness_df 
+```
+
+
+``` {r}
+
+# Let's create a new dataframe
+
+temp11_regular_season_df <- temp10_regular_season_df
+
+# Let's create a random double between 0 and 1
+set.seed(1)
+
+ for (i in 1:nrow(temp11_regular_season_df)) {
+
+    randomDouble <- runif(1, 0, 1)
+
+    #The following rows: Score, TeamID, Conference, Seed, RawSeed, FGM, FGA, FGM3, FGA3, FTM, FTA, OR, DR, Ast, TO, Stl, Blk, PF, and CoachName
+
+    temp11_regular_season_df$AScore[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WScore[i], temp11_regular_season_df$LScore[i])
+
+    temp11_regular_season_df$BScore[i] <- ifelse(temp11_regular_season_df$AScore[i] == temp11_regular_season_df$WScore[i], temp11_regular_season_df$LScore[i], temp11_regular_season_df$WScore[i])
+
+    temp11_regular_season_df$ATeamID[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WTeamID[i], temp11_regular_season_df$LTeamID[i])
+
+    temp11_regular_season_df$BTeamID[i] <- ifelse(temp11_regular_season_df$ATeamID[i] == temp11_regular_season_df$WTeamID[i], temp11_regular_season_df$LTeamID[i], temp11_regular_season_df$WTeamID[i])
+
+    temp11_regular_season_df$AConference[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WConference[i], temp11_regular_season_df$LConference[i])
+
+    temp11_regular_season_df$BConference[i] <- ifelse(temp11_regular_season_df$AConference[i] == temp11_regular_season_df$WConference[i], temp11_regular_season_df$LConference[i], temp11_regular_season_df$WConference[i])
+
+    temp11_regular_season_df$ASeed[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WSeed[i], temp11_regular_season_df$LSeed[i])
+
+    temp11_regular_season_df$BSeed[i] <- ifelse(temp11_regular_season_df$ASeed[i] == temp11_regular_season_df$WSeed[i], temp11_regular_season_df$LSeed[i], temp11_regular_season_df$WSeed[i])
+
+    temp11_regular_season_df$ARawSeed[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WRawSeed[i], temp11_regular_season_df$LRawSeed[i])
+
+    temp11_regular_season_df$BRawSeed[i] <- ifelse(temp11_regular_season_df$ARawSeed[i] == temp11_regular_season_df$WRawSeed[i], temp11_regular_season_df$LRawSeed[i], temp11_regular_season_df$WRawSeed[i])
+
+    temp11_regular_season_df$AFGM[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WFGM[i], temp11_regular_season_df$LFGM[i])
+
+    temp11_regular_season_df$BFGM[i] <- ifelse(temp11_regular_season_df$AFGM[i] == temp11_regular_season_df$WFGM[i], temp11_regular_season_df$LFGM[i], temp11_regular_season_df$WFGM[i])
+
+    temp11_regular_season_df$AFGA[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WFGA[i], temp11_regular_season_df$LFGA[i])
+
+    temp11_regular_season_df$BFGA[i] <- ifelse(temp11_regular_season_df$AFGA[i] == temp11_regular_season_df$WFGA[i], temp11_regular_season_df$LFGA[i], temp11_regular_season_df$WFGA[i])
+
+    temp11_regular_season_df$AFGM3[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WFGM3[i], temp11_regular_season_df$LFGM3[i])
+
+    temp11_regular_season_df$BFGM3[i] <- ifelse(temp11_regular_season_df$AFGM3[i] == temp11_regular_season_df$WFGM3[i], temp11_regular_season_df$LFGM3[i], temp11_regular_season_df$WFGM3[i])
+
+    temp11_regular_season_df$AFGA3[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WFGA3[i], temp11_regular_season_df$LFGA3[i])
+
+    temp11_regular_season_df$BFGA3[i] <- ifelse(temp11_regular_season_df$AFGA3[i] == temp11_regular_season_df$WFGA3[i], temp11_regular_season_df$LFGA3[i], temp11_regular_season_df$WFGA3[i])
+
+    temp11_regular_season_df$AFTM[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WFTM[i], temp11_regular_season_df$LFTM[i])
+
+    temp11_regular_season_df$BFTM[i] <- ifelse(temp11_regular_season_df$AFTM[i] == temp11_regular_season_df$WFTM[i], temp11_regular_season_df$LFTM[i], temp11_regular_season_df$WFTM[i])
+
+    temp11_regular_season_df$AFTA[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WFTA[i], temp11_regular_season_df$LFTA[i])
+
+    temp11_regular_season_df$BFTA[i] <- ifelse(temp11_regular_season_df$AFTA[i] == temp11_regular_season_df$WFTA[i], temp11_regular_season_df$LFTA[i], temp11_regular_season_df$WFTA[i])
+
+    temp11_regular_season_df$AOR[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WOR[i], temp11_regular_season_df$LOR[i])
+
+    temp11_regular_season_df$BOR[i] <- ifelse(temp11_regular_season_df$AOR[i] == temp11_regular_season_df$WOR[i], temp11_regular_season_df$LOR[i], temp11_regular_season_df$WOR[i])
+
+    temp11_regular_season_df$ADR[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WDR[i], temp11_regular_season_df$LDR[i])
+
+    temp11_regular_season_df$BDR[i] <- ifelse(temp11_regular_season_df$ADR[i] == temp11_regular_season_df$WDR[i], temp11_regular_season_df$LDR[i], temp11_regular_season_df$WDR[i])
+
+    temp11_regular_season_df$AAst[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WAst[i], temp11_regular_season_df$LAst[i])
+
+    temp11_regular_season_df$BAst[i] <- ifelse(temp11_regular_season_df$AAst[i] == temp11_regular_season_df$WAst[i], temp11_regular_season_df$LAst[i], temp11_regular_season_df$WAst[i])
+
+    temp11_regular_season_df$AStl[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WStl[i], temp11_regular_season_df$LStl[i])
+
+    temp11_regular_season_df$BStl[i] <- ifelse(temp11_regular_season_df$AStl[i] == temp11_regular_season_df$WStl[i], temp11_regular_season_df$LStl[i], temp11_regular_season_df$WStl[i])
+
+    temp11_regular_season_df$ATO[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WTO[i], temp11_regular_season_df$LTO[i])
+
+    temp11_regular_season_df$BTO[i] <- ifelse(temp11_regular_season_df$ATO[i] == temp11_regular_season_df$WTO[i], temp11_regular_season_df$LTO[i], temp11_regular_season_df$WTO[i])
+
+    temp11_regular_season_df$ABlk[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WBlk[i], temp11_regular_season_df$LBlk[i])
+
+    temp11_regular_season_df$BBlk[i] <- ifelse(temp11_regular_season_df$ABlk[i] == temp11_regular_season_df$WBlk[i], temp11_regular_season_df$LBlk[i], temp11_regular_season_df$WBlk[i])
+
+    temp11_regular_season_df$APF[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WPF[i], temp11_regular_season_df$LPF[i])
+
+    temp11_regular_season_df$BPF[i] <- ifelse(temp11_regular_season_df$APF[i] == temp11_regular_season_df$WPF[i], temp11_regular_season_df$LPF[i], temp11_regular_season_df$WPF[i])
+
+    temp11_regular_season_df$ACoachName[i] <- ifelse(randomDouble < 0.5, temp11_regular_season_df$WCoachName[i], temp11_regular_season_df$LCoachName[i])
+
+    temp11_regular_season_df$BCoachName[i] <- ifelse(temp11_regular_season_df$ACoachName[i] == temp11_regular_season_df$WCoachName[i], temp11_regular_season_df$LCoachName[i], temp11_regular_season_df$WCoachName[i])
+
+ }
+
+ # Drop all the W and L columns since we now have A and B columns
+
+temp11_regular_season_df <- temp11_regular_season_df %>% mutate(Winner = ifelse(ATeamID == WTeamID, 1, 0))
+
+  temp12_regular_season_df <- temp11_regular_season_df %>% select(-c(WTeamID, LTeamID, WScore, LScore, WFGM, LFGM, WFGA, LFGA, WFGM3, LFGM3, WFGA3, LFGA3, WFTM, LFTM, WFTA, LFTA, WOR, LOR, WDR, LDR, WAst, LAst, WTO, LTO, WStl, LStl, WBlk, LBlk, WPF, LPF, WCoachName, LCoachName, WConferenceName, LConferenceName, WSeed, LSeed, WRawSeed, LRawSeed))
+
+
+# Now let's do the same thing for the tournament data
+
+temp11_march_madness_df <- temp10_march_madness_df
+
+for (i in 1:nrow(temp11_march_madness_df)) {
+
+ randomDouble <- runif(1, 0, 1)
+
+ temp11_march_madness_df$ASeed[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WSeed[i], temp11_march_madness_df$LSeed[i])
+
+ temp11_march_madness_df$BSeed[i] <- ifelse(temp11_march_madness_df$ASeed[i] == temp11_march_madness_df$WSeed[i], temp11_march_madness_df$LSeed[i], temp11_march_madness_df$WSeed[i])
+
+ temp11_march_madness_df$ARawSeed[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WRawSeed[i], temp11_march_madness_df$LRawSeed[i])
+
+ temp11_march_madness_df$BRawSeed[i] <- ifelse(temp11_march_madness_df$ARawSeed[i] == temp11_march_madness_df$WRawSeed[i], temp11_march_madness_df$LRawSeed[i], temp11_march_madness_df$WRawSeed[i])
+
+ temp11_march_madness_df$AConferenceName[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WConferenceName[i], temp11_march_madness_df$LConferenceName[i])
+
+ temp11_march_madness_df$BConferenceName[i] <- ifelse(temp11_march_madness_df$AConferenceName[i] == temp11_march_madness_df$WConferenceName[i], temp11_march_madness_df$LConferenceName[i], temp11_march_madness_df$WConferenceName[i])
+
+ temp11_march_madness_df$AFTM[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WFTM[i], temp11_march_madness_df$LFTM[i])
+
+ temp11_march_madness_df$BFTM[i] <- ifelse(temp11_march_madness_df$AFTM[i] == temp11_march_madness_df$WFTM[i], temp11_march_madness_df$LFTM[i], temp11_march_madness_df$WFTM[i])
+
+  temp11_march_madness_df$AFTA[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WFTA[i], temp11_march_madness_df$LFTA[i])
+
+  temp11_march_madness_df$BFTA[i] <- ifelse(temp11_march_madness_df$AFTA[i] == temp11_march_madness_df$WFTA[i], temp11_march_madness_df$LFTA[i], temp11_march_madness_df$WFTA[i])
+
+  temp11_march_madness_df$AOR[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WOR[i], temp11_march_madness_df$LOR[i])
+
+  temp11_march_madness_df$BOR[i] <- ifelse(temp11_march_madness_df$AOR[i] == temp11_march_madness_df$WOR[i], temp11_march_madness_df$LOR[i], temp11_march_madness_df$WOR[i])
+
+  temp11_march_madness_df$ADR[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WDR[i], temp11_march_madness_df$LDR[i])
+
+  temp11_march_madness_df$BDR[i] <- ifelse(temp11_march_madness_df$ADR[i] == temp11_march_madness_df$WDR[i], temp11_march_madness_df$LDR[i], temp11_march_madness_df$WDR[i])
+
+  temp11_march_madness_df$AAst[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WAst[i], temp11_march_madness_df$LAst[i])
+
+  temp11_march_madness_df$BAst[i] <- ifelse(temp11_march_madness_df$AAst[i] == temp11_march_madness_df$WAst[i], temp11_march_madness_df$LAst[i], temp11_march_madness_df$WAst[i])
+
+  temp11_march_madness_df$ATO[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WTO[i], temp11_march_madness_df$LTO[i])
+
+  temp11_march_madness_df$BTO[i] <- ifelse(temp11_march_madness_df$ATO[i] == temp11_march_madness_df$WAst[i], temp11_march_madness_df$LAst[i], temp11_march_madness_df$WAst[i])
+
+  temp11_march_madness_df$AStl[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WStl[i], temp11_march_madness_df$LStl[i])
+
+  temp11_march_madness_df$BStl[i] <- ifelse(temp11_march_madness_df$AStl[i] == temp11_march_madness_df$WStl[i], temp11_march_madness_df$LStl[i], temp11_march_madness_df$WStl[i])
+
+  temp11_march_madness_df$ABlk[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WBlk[i], temp11_march_madness_df$LBlk[i])
+
+  temp11_march_madness_df$BBlk[i] <- ifelse(temp11_march_madness_df$ABlk[i] == temp11_march_madness_df$WBlk[i], temp11_march_madness_df$LBlk[i], temp11_march_madness_df$WBlk[i])
+
+  temp11_march_madness_df$APF[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WPF[i], temp11_march_madness_df$LPF[i])
+
+  temp11_march_madness_df$BPF[i] <- ifelse(temp11_march_madness_df$APF[i] == temp11_march_madness_df$WPF[i], temp11_march_madness_df$LPF[i], temp11_march_madness_df$WPF[i])
+
+  temp11_march_madness_df$ACoachName[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WCoachName[i], temp11_march_madness_df$LCoachName[i])
+
+  temp11_march_madness_df$BCoachName[i] <- ifelse(temp11_march_madness_df$ACoachName[i] == temp11_march_madness_df$WCoachName[i], temp11_march_madness_df$LCoachName[i], temp11_march_madness_df$WCoachName[i])
+
+  #Score
+
+  temp11_march_madness_df$AScore[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WScore[i], temp11_march_madness_df$LScore[i])
+
+  temp11_march_madness_df$BScore[i] <- ifelse(temp11_march_madness_df$AScore[i] == temp11_march_madness_df$WScore[i], temp11_march_madness_df$LScore[i], temp11_march_madness_df$WScore[i])
+
+  #TeamID
+
+  temp11_march_madness_df$ATeamID[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WTeamID[i], temp11_march_madness_df$LTeamID[i])
+
+  temp11_march_madness_df$BTeamID[i] <- ifelse(temp11_march_madness_df$ATeamID[i] == temp11_march_madness_df$WTeamID[i], temp11_march_madness_df$LTeamID[i], temp11_march_madness_df$WTeamID[i])
+
+  #FGM
+
+  temp11_march_madness_df$AFGM[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WFGM[i], temp11_march_madness_df$LFGM[i])
+
+  temp11_march_madness_df$BFGM[i] <- ifelse(temp11_march_madness_df$AFGM[i] == temp11_march_madness_df$WFGM[i], temp11_march_madness_df$LFGM[i], temp11_march_madness_df$WFGM[i])
+
+  #FGA
+
+  temp11_march_madness_df$AFGA[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WFGA[i], temp11_march_madness_df$LFGA[i])
+
+  temp11_march_madness_df$BFGA[i] <- ifelse(temp11_march_madness_df$AFGA[i] == temp11_march_madness_df$WFGA[i], temp11_march_madness_df$LFGA[i], temp11_march_madness_df$WFGA[i])
+
+  #FGM3
+
+  temp11_march_madness_df$AFGM3[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WFGM3[i], temp11_march_madness_df$LFGM3[i])
+
+  temp11_march_madness_df$BFGM3[i] <- ifelse(temp11_march_madness_df$AFGM3[i] == temp11_march_madness_df$WFGM3[i], temp11_march_madness_df$LFGM3[i], temp11_march_madness_df$WFGM3[i])
+
+  #FGA3
+
+  temp11_march_madness_df$AFGA3[i] <- ifelse(randomDouble < 0.5, temp11_march_madness_df$WFGA3[i], temp11_march_madness_df$LFGA3[i])
+
+  temp11_march_madness_df$BFGA3[i] <- ifelse(temp11_march_madness_df$AFGA3[i] == temp11_march_madness_df$WFGA3[i], temp11_march_madness_df$LFGA3[i], temp11_march_madness_df$WFGA3[i])
+
+}
+
+
+temp11_march_madness_df <- temp11_march_madness_df %>% mutate(Winner = ifelse(ATeamID == WTeamID, 1, 0))
+
+
+
+temp12_march_madness_df <- temp11_march_madness_df %>% select(-c(WTeamID, LTeamID, WScore, LScore, WFGM, LFGM, WFGA, LFGA, WFGM3, LFGM3, WFGA3, LFGA3, WFTM, LFTM, WFTA, LFTA, WOR, LOR, WDR, LDR, WAst, LAst, WTO, LTO, WStl, LStl, WBlk, LBlk, WPF, LPF, WCoachName, LCoachName, WConferenceName, LConferenceName, WSeed, LSeed, WRawSeed, LRawSeed))
+
+
+# Mutate the Winner column so that if Winner == ATeamID then Winner = 1, else 0
+
+temp13_march_madness_df <- temp12_march_madness_df 
+
+temp13_reg_season_df <- temp12_regular_season_df 
+
+
+head(temp13_march_madness_df)
+
+head(temp13_reg_season_df)
+
+```
+
+
+``` {r}
+team_ids <- c(temp13_reg_season_df$ATeamID, temp13_reg_season_df$BTeamID)
+
+team_ids <- unique(team_ids)
+
+statistic_df <- data.frame(team_ids)
+
+new_a_columns <- names(temp13_reg_season_df)[grep("^A", names(temp13_reg_season_df))]
+
+new_b_columns <- names(temp13_reg_season_df)[grep("^B", names(temp13_reg_season_df))]
+
+statistic_a_df <- statistic_df %>%
+  left_join(temp13_reg_season_df, by = c("team_ids" = "ATeamID")) %>%
+  select(Season, team_ids, AScore, AFGM, AFGA, AFGM3, AFGA3, AFTM, AFTA, AOR, ADR, AAst, ATO, AStl, ABlk, APF) %>%
+  rename(Season = Season, TeamId = team_ids, Score = AScore, FGM = AFGM, FGA = AFGA, FGM3 = AFGM3, FGA3 = AFGA3, FTM = AFTM, FTA = AFTA, OR = AOR, DR = ADR, Ast = AAst, TO = ATO, Stl = AStl, Blk = ABlk, PF = APF)
+
+statistic_b_df <- statistic_df %>%
+  left_join(temp13_reg_season_df, by = c("team_ids" = "BTeamID")) %>%
+  select(Season, team_ids, BScore, BFGM, BFGA, BFGM3, BFGA3, BFTM, BFTA, BOR, BDR, BAst, BTO, BStl, BBlk, BPF) %>%
+  rename(Season = Season, TeamId = team_ids, Score = BScore, FGM = BFGM, FGA = BFGA, FGM3 = BFGM3, FGA3 = BFGA3, FTM = BFTM, FTA = BFTA, OR = BOR, DR = BDR, Ast = BAst, TO = BTO, Stl = BStl, Blk = BBlk, PF = BPF)
+
+statistic_df <- bind_rows(statistic_a_df, statistic_b_df) %>%
+  group_by(Season, TeamId) %>%
+  summarise(
+    Score = mean(Score),
+    FGM = mean(FGM),
+    FGA = mean(FGA),
+    FGM3 = mean(FGM3),
+    FGA3 = mean(FGA3),
+    FTM = mean(FTM),
+    FTA = mean(FTA),
+    OR = mean(OR),
+    DR = mean(DR),
+    Ast = mean(Ast),
+    TO = mean(TO),
+    Stl = mean(Stl),
+    Blk = mean(Blk),
+    PF = mean(PF),
+  )
+
+final_regular_season_train <- temp13_reg_season_df %>%
+  select(-c(AScore, BScore, AFGM, BFGM, AFGA, BFGA, AFGM3, BFGM3, AFGA3, BFGA3, AFTM, BFTM, AFTA, BFTA, AOR, BOR, ADR, BDR, AAst, BAst, ATO, BTO, AStl, BStl, ABlk, BBlk, APF, BPF)) %>%
+  # Join with statistic_df on ATeamID, Season (from temp13_reg_season_df) and TeamId, Season (from statistic_df)
+  left_join(statistic_df, by = c("ATeamID" = "TeamId", "Season")) %>%
+  # Rename the columns to match the names in temp13_reg_season_df (with all the A's)
+  rename(AScore = Score, AFGM = FGM, AFGA = FGA, AFGM3 = FGM3, AFGA3 = FGA3, AFTM = FTM, AFTA = FTA, AOR = OR, ADR = DR, AAst = Ast, ATO = TO, AStl = Stl, ABlk = Blk, APF = PF) %>%
+  # Join with statistic_df on BTeamID, Season (from temp13_reg_season_df) and TeamId, Season (from statistic_df)
+  left_join(statistic_df, by = c("BTeamID" = "TeamId", "Season")) %>%
+  # Rename the columns to match the names in temp13_reg_season_df (with all the B's)
+  rename(BScore = Score, BFGM = FGM, BFGA = FGA, BFGM3 = FGM3, BFGA3 = FGA3, BFTM = FTM, BFTA = FTA, BOR = OR, BDR = DR, BAst = Ast, BTO = TO, BStl = Stl, BBlk = Blk, BPF = PF) %>%
+  mutate (is_regular_season = 1)
+
+temp_march_madness_train <- temp13_march_madness_df %>%
+  select(-c(AScore, BScore, AFGM, BFGM, AFGA, BFGA, AFGM3, BFGM3, AFGA3, BFGA3, AFTM, BFTM, AFTA, BFTA, AOR, BOR, ADR, BDR, AAst, BAst, ATO, BTO, AStl, BStl, ABlk, BBlk, APF, BPF)) %>%
+  left_join(statistic_df, by = c("ATeamID" = "TeamId", "Season")) %>%
+  rename(AScore = Score, AFGM = FGM, AFGA = FGA, AFGM3 = FGM3, AFGA3 = FGA3, AFTM = FTM, AFTA = FTA, AOR = OR, ADR = DR, AAst = Ast, ATO = TO, AStl = Stl, ABlk = Blk, APF = PF) %>%
+  left_join(statistic_df, by = c("BTeamID" = "TeamId", "Season")) %>%
+  rename(BScore = Score, BFGM = FGM, BFGA = FGA, BFGM3 = FGM3, BFGA3 = FGA3, BFTM = FTM, BFTA = FTA, BOR = OR, BDR = DR, BAst = Ast, BTO = TO, BStl = Stl, BBlk = Blk, BPF = PF) %>%
+  mutate (is_regular_season = 0) %>%
+  mutate(AConference = AConferenceName) %>%
+  mutate(BConference = BConferenceName) %>%
+  select(-c(AConferenceName, BConferenceName))
+
+  
+
+    # order the columns of final_regular_season_train in alphabetical order
+
+    final_regular_season_train <- final_regular_season_train[, order(names(final_regular_season_train))]
+
+    temp_march_madness_train <- temp_march_madness_train[, order(names(temp_march_madness_train))] 
+  
+    head(final_regular_season_train)
+    
+    head(temp_march_madness_train)
+```
+
+Now let's create the test dataset 
+
+```{r}
+
+march_madness_2022_test <- temp_march_madness_train %>%
+  filter(Season == 2022)
+
+
+final_march_madness_train <- temp_march_madness_train %>%
+  filter(Season != 2022)
+
+
+ final_train <- rbind(final_regular_season_train, final_march_madness_train)
+
+ head(final_train)
+ 
+ final_test <- march_madness_2022_test
+
+ head(final_test)
+
+
+ #Ensure that Winner is treated as a categorical variable
+
+  final_train$Winner <- as.factor(final_train$Winner)
+
+  final_test$Winner <- as.factor(final_test$Winner)
+```
+
+So now that we have a final_train and a final_test dataset, we can now begin to introduce various models for classification.
+
+## Logistic Regression
+
+Logistic regression is a classification algorithm that is used to predict a binary outcome (1 / 0, Yes / No, True / False) given a set of independent variables. In our case, we are trying to predict the outcome of a 2022 NCAA March Madness game given various statistics of the two teams.
+
+The way we predict a win given the various statistics is by estimating: Pr(win | statistics) = $\hat{p}$ and then setting a threshold for $\hat{p}$ to determine whether a team wins or loses. 
+
+Let's now build a logistic regression model using our dataset. 
+
+```{r}
+
+# Step 1: Build the model
+
+logistic_regression_model <- glm(Winner ~ ., data = final_train, family = binomial(logit))
+
+# Step 2: Summarize the model
+
+summary(logistic_regression_model) 
+
+# Step 3: Make predictions
+
+logistic_regression_model_predictions <- predict(logistic_regression_model, final_test)
+
+# Step 4: Threshold the predictions
+
+logistic_regression_model_predictions <- ifelse(logistic_regression_model_predictions > 0.5, 1, 0)
+
+# Step 5: Calculate the error rate
+
+logistic_regression_model_error_rate <- mean(logistic_regression_model_predictions != final_test$Winner)
+
+# Step 6: Print the error rate
+
+logistic_regression_model_error_rate
+
+# Step 7: Plot ROC curve with AUC annotated on the plot
+
+test_prob <- predict(logistic_regression_model, newdata = final_test, type = "response")
+test_roc <- roc(final_test$Winner ~ test_prob, plot = TRUE, print.auc = TRUE)
+```
+
+## Decision Trees
+
+Decision trees are another classification algorithm that is used to predict a binary outcome (1 / 0, Yes / No, True / False) given a set of independent variables. In our case, we are trying to predict the outcome of a 2022 NCAA March Madness game given various statistics of the two teams.
+
+Again, we are estimating the probability of a team winning a game given various statistics of the two team, and then using that as a maximum likelihood estimate to predict the outcome of the game.
+
+Decision Trees are a model-free approach to classification, meaning that we do not need to specify a model for the data. Instead, we can use the data to build a tree that splits the data into different regions, and then we can use the regions to make predictions.
+
+Given the accuracy of the logistic regression, it was hypothesized that there might not be a linear relationship between the predictors and the log-odds of the response. Thus, a decision tree was used to try increase the accuracy of the model.
+
+Let's build a decision tree using our dataset. 
+
+```{r}
+
+# Step 1: Build the model
+
+decision_tree_model <- rpart(Winner ~ ., data = final_train, method = "class")
+
+# Step 2: Make predictions
+
+decision_tree_model_predictions <- predict(decision_tree_model, final_test, type = "class")
+
+# Step 3: Calculate the error rate
+
+decision_tree_model_error_rate <- mean(decision_tree_model_predictions != final_test$Winner)
+
+# Step 4: Print the error rate
+
+decision_tree_model_error_rate
+
+# Step 5: Plot the tree
+
+rpart.plot(decision_tree_model)
+
+```
+
+An interesting observation from the decision tree was that, contrary to the EDA, features that were important predictors of games were not expected. The coach, for example, was instrumental in the model's predictions, which was not expected when performing EDA. This was an empirically interesting result, further justified in other analyses. 
+
+One of the key issues with decision trees is that they are prone to large variance, and thus they are prone to overfitting. To reduce the variance of the decision tree and increase the accuracy of the model, we can use bagging, which is a technique that uses bootstrap aggregation to reduce the variance of the decision tree.
+
+This general case of bagging is called random forests. In aggregation to generate a random forest, we randomly choose a subset of the features to build the decision trees. This is called random feature selection, and it reduces the correlation between the decision trees, which reduces the variance of the random forest. This model was the final model, with the highest accuracy predicting the 2022 March Madness tournament results:
+
+## Final Model: Random Forest
+Let's build a random forest using our dataset. 
+
+```{r}
+
+# Step 1: Build the model
+
+random_forest_model <- randomForest(Winner~.,
+        data=final_train,
+        na.action=na.roughfix)
+
+# Step 2: Make predictions
+
+random_forest_model_predictions <- predict(random_forest_model, final_test)
+
+# Step 3: Calculate the error rate
+
+random_forest_model_error_rate <- mean(random_forest_model_predictions != final_test$Winner)
+
+# Step 4: Print the error rate
+
+random_forest_model_error_rate
+```
+
+```{r}
+a <- varImp(random_forest_model, cex.axis = 1.5)
+a <- cbind(Predictor = rownames(a), a)
+rownames(a) <- 1:nrow(a)
+ggplot(a, aes(x = Predictor, y = Overall)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Importance by Predictor in Final Random Forest Model ", x = "Predictor", y = "Importance")
+```
+
+# Conclusions and Future Steps
+The Random Forest model was used to accurately (84%) predict the outcomes of the 2022 March Madness tournament, demonstrating the potential of this model. However, there is still room for improvement. Future work can focus on the most important predictors' predicting power. For example, the team's coach could be further explored with additional analysis on coach movement from one team to another. Feature engineering to incorporate additional factors, such as player injuries and rest time, will strengthen the model as they may impact game outcomes. This can be achieved through a more diversified collection of data and feature selection techniques. Additionally, further hyperparameter tuning can be done to optimize the model's performance. Overall, these refinements can enhance the model's accuracy and robustness for predicting the outcomes of the March Madness tournament for subsequent years.
